@@ -26,6 +26,7 @@ services:
       - JOB_TTL_SECONDS=86400
       - HF_TOKEN=${HF_TOKEN:-}
       - WHISPER_MODEL=${WHISPER_MODEL:-small}
+      - WORKER_CONCURRENCY=${WORKER_CONCURRENCY:-3}
     volumes:
       - jobs_data:/app/jobs
       # Mount HuggingFace cache to avoid re-downloading models

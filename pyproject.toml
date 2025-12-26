@@ -3,7 +3,7 @@ name = "stt-whisper-pyannote"
 version = "2.0.0"
 description = "Production-ready speech-to-text API with speaker diarization using Whisper and Pyannote"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.14"
 dependencies = [
     "audioop-lts>=0.2.1",
     "fastapi>=0.115.0",

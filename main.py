@@ -27,6 +27,7 @@ JOBS_DIR = os.getenv("JOBS_DIR", os.path.join(os.getcwd(), "jobs"))
 JOB_TTL_SECONDS = int(os.getenv("JOB_TTL_SECONDS", "86400"))  # 24 hours default
 REDIS_QUEUE_KEY = "transcription:queue"
 REDIS_JOB_PREFIX = "transcription:job:"
+WORKER_CONCURRENCY = int(os.getenv("WORKER_CONCURRENCY", "3"))
 
 # ----- Pydantic Models -----
 
@@ -63,7 +64,7 @@ pipeline: Optional[Pipeline] = None
 whisper_model = None
 device = torch.device("cpu")
 redis_client: Optional[redis.Redis] = None
-worker_task: Optional[asyncio.Task] = None
+worker_tasks: list[asyncio.Task] = []
 
 
 # ----- Helpers -----
@@ -194,10 +195,10 @@ def cleanup_job_file(file_path: Optional[str]):
 # ----- Background Worker -----
 
 
-async def job_worker():
+async def job_worker(worker_id: int = 0):
     """Background worker that polls Redis queue and processes jobs."""
     assert redis_client is not None
-    print("Job worker started, waiting for jobs...")
+    print(f"Job worker #{worker_id} started, waiting for jobs...")
 
     while True:
         try:
@@ -211,7 +212,7 @@ async def job_worker():
 
             job = await get_job(job_id)
             if job is None:
-                print(f"Job {job_id} not found in Redis, skipping")
+                print(f"[worker {worker_id}] Job {job_id} not found in Redis, skipping")
                 continue
 
             try:
@@ -221,13 +222,13 @@ async def job_worker():
                 job["error"] = str(e)
                 job["updated_at"] = datetime.utcnow()
                 await save_job(job)
-                print(f"Job {job_id} failed: {e}")
+                print(f"[worker {worker_id}] Job {job_id} failed: {e}")
 
         except asyncio.CancelledError:
-            print("Job worker cancelled")
+            print(f"Job worker #{worker_id} cancelled")
             break
         except Exception as e:
-            print(f"Worker error: {e}")
+            print(f"Worker #{worker_id} error: {e}")
             await asyncio.sleep(1)
 
 
@@ -275,7 +276,7 @@ async def process_job(job: dict):
         start_sample = int(turn.start * sample_rate)
         end_sample = int(turn.end * sample_rate)
         segment_audio = audio_np[start_sample:end_sample]
-        result = whisper_model.transcribe(segment_audio, fp16=False)
+        result = whisper_model.transcribe(segment_audio, fp16=False, language="pt")
         text = result["text"].strip()
 
         seg = TranscriptionSegment(
@@ -317,7 +318,7 @@ async def process_job(job: dict):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown logic."""
-    global pipeline, whisper_model, device, redis_client, worker_task
+    global pipeline, whisper_model, device, redis_client, worker_tasks
 
     # Connect to Redis
     redis_client = redis.from_url(REDIS_URL, decode_responses=False)
@@ -340,18 +341,21 @@ async def lifespan(app: FastAPI):
     whisper_model = whisper.load_model(whisper_model_name, device=str(device))
     print(f"Models loaded successfully on {device}!")
 
-    # Start background worker
-    worker_task = asyncio.create_task(job_worker())
+    # Start background workers (configurable concurrency)
+    for i in range(max(WORKER_CONCURRENCY, 1)):
+        worker_tasks.append(asyncio.create_task(job_worker(i)))
 
     yield
 
     # Shutdown
-    if worker_task:
-        worker_task.cancel()
+    for t in worker_tasks:
+        t.cancel()
+    for t in worker_tasks:
         try:
-            await worker_task
+            await t
         except asyncio.CancelledError:
             pass
+    worker_tasks.clear()
 
     if redis_client:
         await redis_client.close()
@@ -466,7 +470,7 @@ async def transcribe_audio(file: UploadFile = File(...)):
             start_sample = int(turn.start * sample_rate)
             end_sample = int(turn.end * sample_rate)
             segment_audio = audio_np[start_sample:end_sample]
-            result = whisper_model.transcribe(segment_audio, fp16=False)
+            result = whisper_model.transcribe(segment_audio, fp16=False, language="id")
             text = result["text"].strip()
             segment = TranscriptionSegment(
                 start=float(turn.start),

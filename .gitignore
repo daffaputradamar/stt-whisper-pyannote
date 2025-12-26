@@ -10,9 +10,8 @@ wheels/
 .venv
 
 # Local config
-.env
-.python-version
-uv.lock
+.env*
+!.env.example
 
 # Temp job data
 jobs/
