@@ -1,0 +1,25 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Local config
+.env
+.python-version
+uv.lock
+
+# Temp job data
+jobs/
+
+# Editors/OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+.swp

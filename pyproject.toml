@@ -1,0 +1,17 @@
+[project]
+name = "stt-whisper-pyannote"
+version = "2.0.0"
+description = "Production-ready speech-to-text API with speaker diarization using Whisper and Pyannote"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "audioop-lts>=0.2.1",
+    "fastapi>=0.115.0",
+    "openai-whisper>=20240930",
+    "pyannote-audio>=4.0.1",
+    "pydub>=0.25.1",
+    "soundfile>=0.12.1",
+    "python-multipart>=0.0.18",
+    "uvicorn>=0.34.0",
+    "redis>=5.0.0",
+]
