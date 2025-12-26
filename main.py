@@ -143,7 +143,7 @@ async def get_job(job_id: str) -> Optional[dict]:
     return _deserialize_job(data)
 
 
-async def enqueue_job(file: UploadFile) -> str:
+async def enqueue_job(file: UploadFile, language: str = "id") -> str:
     """Save file to disk and enqueue job in Redis."""
     if redis_client is None:
         raise RuntimeError("Redis not connected")
@@ -172,6 +172,7 @@ async def enqueue_job(file: UploadFile) -> str:
         "created_at": now,
         "updated_at": now,
         "file_path": dest_path,
+        "language": language,
     }
 
     await save_job(job)
@@ -238,7 +239,8 @@ async def process_job(job: dict):
         raise RuntimeError("Models not loaded yet")
 
     job_id = job["id"]
-    print(f"Processing job {job_id}")
+    language = job.get("language", "id")
+    print(f"Processing job {job_id} with language: {language}")
 
     job["status"] = "diarizing"
     job["stage_detail"] = "running speaker diarization"
@@ -276,7 +278,7 @@ async def process_job(job: dict):
         start_sample = int(turn.start * sample_rate)
         end_sample = int(turn.end * sample_rate)
         segment_audio = audio_np[start_sample:end_sample]
-        result = whisper_model.transcribe(segment_audio, fp16=False, language="pt")
+        result = whisper_model.transcribe(segment_audio, fp16=False, language=language)
         text = result["text"].strip()
 
         seg = TranscriptionSegment(
@@ -398,12 +400,12 @@ async def health_check():
 
 
 @app.post("/jobs", response_model=JobCreateResponse)
-async def create_job(file: UploadFile = File(...)):
+async def create_job(file: UploadFile = File(...), language: str = "id"):
     """Submit a long audio transcription job. Returns a job id for polling."""
     if pipeline is None or whisper_model is None:
         raise HTTPException(status_code=503, detail="Models not loaded yet")
     try:
-        job_id = await enqueue_job(file)
+        job_id = await enqueue_job(file, language=language)
         return JobCreateResponse(job_id=job_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -448,7 +450,7 @@ async def delete_job(job_id: str):
 
 
 @app.post("/transcribe", response_model=TranscriptionResponse)
-async def transcribe_audio(file: UploadFile = File(...)):
+async def transcribe_audio(file: UploadFile = File(...), language: str = "id"):
     """Synchronous transcription endpoint for shorter audio files."""
     if pipeline is None or whisper_model is None:
         raise HTTPException(status_code=503, detail="Models not loaded yet")
@@ -470,7 +472,7 @@ async def transcribe_audio(file: UploadFile = File(...)):
             start_sample = int(turn.start * sample_rate)
             end_sample = int(turn.end * sample_rate)
             segment_audio = audio_np[start_sample:end_sample]
-            result = whisper_model.transcribe(segment_audio, fp16=False, language="id")
+            result = whisper_model.transcribe(segment_audio, fp16=False, language=language)
             text = result["text"].strip()
             segment = TranscriptionSegment(
                 start=float(turn.start),
