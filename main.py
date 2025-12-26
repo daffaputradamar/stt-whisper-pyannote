@@ -4,7 +4,7 @@ import uuid
 import json
 from datetime import datetime
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Header
 from pyannote.audio import Pipeline
 import whisper
 import numpy as np
@@ -28,6 +28,7 @@ JOB_TTL_SECONDS = int(os.getenv("JOB_TTL_SECONDS", "86400"))  # 24 hours default
 REDIS_QUEUE_KEY = "transcription:queue"
 REDIS_JOB_PREFIX = "transcription:job:"
 WORKER_CONCURRENCY = int(os.getenv("WORKER_CONCURRENCY", "3"))
+API_KEY = os.getenv("API_KEY")
 
 # ----- Pydantic Models -----
 
@@ -76,6 +77,14 @@ def detect_device() -> torch.device:
     if torch.backends.mps.is_available():
         return torch.device("mps")
     return torch.device("cpu")
+
+
+async def verify_api_key(x_api_key: Optional[str] = Header(default=None)) -> None:
+    """Simple API key check using X-API-Key header."""
+    if not API_KEY:
+        raise HTTPException(status_code=500, detail="API key is not configured on the server")
+    if x_api_key != API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
 
 def load_audio_bytes(data: bytes, target_sr: int = 16000) -> tuple[torch.Tensor, int, np.ndarray]:
@@ -399,7 +408,7 @@ async def health_check():
     }
 
 
-@app.post("/jobs", response_model=JobCreateResponse)
+@app.post("/jobs", response_model=JobCreateResponse, dependencies=[Depends(verify_api_key)])
 async def create_job(file: UploadFile = File(...), language: str = "id"):
     """Submit a long audio transcription job. Returns a job id for polling."""
     if pipeline is None or whisper_model is None:
@@ -411,7 +420,7 @@ async def create_job(file: UploadFile = File(...), language: str = "id"):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/jobs/{job_id}", response_model=JobStatusResponse)
+@app.get("/jobs/{job_id}", response_model=JobStatusResponse, dependencies=[Depends(verify_api_key)])
 async def get_job_status(job_id: str):
     """Poll job status. When completed, includes the transcription result."""
     job = await get_job(job_id)
@@ -429,7 +438,7 @@ async def get_job_status(job_id: str):
     )
 
 
-@app.delete("/jobs/{job_id}")
+@app.delete("/jobs/{job_id}", dependencies=[Depends(verify_api_key)])
 async def delete_job(job_id: str):
     """Delete a job and its associated files."""
     if redis_client is None:
@@ -449,7 +458,7 @@ async def delete_job(job_id: str):
     return {"status": "deleted", "job_id": job_id}
 
 
-@app.post("/transcribe", response_model=TranscriptionResponse)
+@app.post("/transcribe", response_model=TranscriptionResponse, dependencies=[Depends(verify_api_key)])
 async def transcribe_audio(file: UploadFile = File(...), language: str = "id"):
     """Synchronous transcription endpoint for shorter audio files."""
     if pipeline is None or whisper_model is None:
